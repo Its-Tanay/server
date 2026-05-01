@@ -34,7 +34,10 @@ from functools import partial
 
 import numpy as np
 import tritonclient.grpc as grpcclient
-from tritonclient.utils import InferenceServerException
+from tritonclient.grpc import service_pb2, service_pb2_grpc
+from tritonclient.utils import InferenceServerException, deserialize_bytes_tensor
+
+import grpc
 
 
 class UserData:
@@ -75,6 +78,67 @@ class GrpcTest(unittest.TestCase):
         self.assertTrue(
             client.is_server_live(),
             "Server is not healthy after duplicate output request",
+        )
+
+
+class GrpcBytesContentsTest(unittest.TestCase):
+    def setUp(self):
+        self.grpc_stub_ = service_pb2_grpc.GRPCInferenceServiceStub(
+            grpc.insecure_channel("localhost:8001")
+        )
+        self.client_ = grpcclient.InferenceServerClient(url="localhost:8001")
+        self.model_name_ = "simple_string"
+
+    def _build_request(self, input0_values, input1_values=None):
+        request = service_pb2.ModelInferRequest()
+        request.model_name = self.model_name_
+        request.id = "explicit-bytes-contents"
+
+        input0 = request.inputs.add()
+        input0.name = "INPUT0"
+        input0.datatype = "BYTES"
+        input0.shape.extend([1, 16])
+        input0.contents.bytes_contents.extend(input0_values)
+
+        if input1_values is not None:
+            input1 = request.inputs.add()
+            input1.name = "INPUT1"
+            input1.datatype = "BYTES"
+            input1.shape.extend([1, 16])
+            input1.contents.bytes_contents.extend(input1_values)
+
+        request.outputs.add().name = "OUTPUT0"
+        request.outputs.add().name = "OUTPUT1"
+        return request
+
+    def test_explicit_bytes_contents_success(self):
+        request = self._build_request(
+            [f"{i}".encode("utf-8") for i in range(16)],
+            [b"1"] * 16,
+        )
+        response = self.grpc_stub_.ModelInfer(request, timeout=30)
+
+        self.assertEqual(len(response.outputs), 2)
+        self.assertEqual(len(response.raw_output_contents), 2)
+
+        sum_out = deserialize_bytes_tensor(response.raw_output_contents[0]).reshape((1, 16))
+        diff_out = deserialize_bytes_tensor(response.raw_output_contents[1]).reshape((1, 16))
+
+        for i in range(16):
+            self.assertEqual(int(sum_out[0][i]), i + 1)
+            self.assertEqual(int(diff_out[0][i]), i - 1)
+
+    def test_explicit_bytes_contents_many_elements_rejected(self):
+        # Shape is [1, 16] but the tensor payload carries significantly more
+        # elements through bytes_contents, which should be rejected by backend.
+        request = self._build_request([b""] * 32768, [b"1"] * 16)
+
+        with self.assertRaises(grpc.RpcError):
+            self.grpc_stub_.ModelInfer(request, timeout=30)
+
+        self.assertTrue(
+            self.client_.is_server_live(),
+            "Server is not healthy after large bytes_contents rejection",
         )
 
 

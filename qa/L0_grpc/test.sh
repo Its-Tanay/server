@@ -357,6 +357,14 @@ if [ $? -ne 0 ]; then
     RET=1
 fi
 
+# Test explicit BYTES tensor payload via bytes_contents field
+python $PYTHON_UNIT_TEST GrpcBytesContentsTest >> ${CLIENT_LOG}.bytes_contents 2>&1
+if [ $? -ne 0 ]; then
+    cat ${CLIENT_LOG}.bytes_contents
+    echo -e "\n***\n*** Python GRPC bytes_contents Test Failed\n***"
+    RET=1
+fi
+
 set -e
 kill $SERVER_PID
 wait $SERVER_PID

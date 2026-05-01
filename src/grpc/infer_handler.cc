@@ -26,6 +26,8 @@
 
 #include "infer_handler.h"
 
+#include <limits>
+
 #ifndef NDEBUG
 uint64_t
 NextUniqueId()
@@ -587,15 +589,48 @@ InferGRPCToInput(
           serialized_data->emplace_back();
           auto& serialized = serialized_data->back();
 
-          // Serialize the output tensor strings. Each string is
+          size_t serialized_byte_size = 0;
+          for (const auto& element : io.contents().bytes_contents()) {
+            if (element.size() > std::numeric_limits<uint32_t>::max()) {
+              return TRITONSERVER_ErrorNew(
+                  TRITONSERVER_ERROR_INVALID_ARG,
+                  std::string(
+                      "input tensor '" + io.name() + "' for model '" +
+                      request.model_name() +
+                      "' has a bytes element larger than the supported "
+                      "maximum size (" +
+                      std::to_string(std::numeric_limits<uint32_t>::max()) +
+                      " bytes).")
+                      .c_str());
+            }
+
+            const size_t element_serialized_size =
+                sizeof(uint32_t) + element.size();
+            if (serialized_byte_size >
+                (std::numeric_limits<size_t>::max() -
+                 element_serialized_size)) {
+              return TRITONSERVER_ErrorNew(
+                  TRITONSERVER_ERROR_INVALID_ARG,
+                  std::string(
+                      "input tensor '" + io.name() + "' for model '" +
+                      request.model_name() +
+                      "' has bytes_contents that overflow the serialized "
+                      "byte size.")
+                      .c_str());
+            }
+            serialized_byte_size += element_serialized_size;
+          }
+          serialized.reserve(serialized_byte_size);
+
+          // Serialize the input tensor strings. Each string is
           // serialized as a 4-byte length followed by the string itself
           // with no null-terminator.
           for (const auto& element : io.contents().bytes_contents()) {
-            uint32_t len{(uint32_t)element.size()};
+            const uint32_t len = static_cast<uint32_t>(element.size());
             serialized.append(
                 reinterpret_cast<const char*>(&len), sizeof(uint32_t));
             if (element.size() > 0) {
-              serialized.append(element.c_str(), len);
+              serialized.append(element.data(), len);
             }
           }
           base = serialized.c_str();
