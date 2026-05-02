@@ -152,6 +152,14 @@ sed -i "/CONTROL_SEQUENCE_CORRID/{n;s/data_type:.*/data_type: TYPE_STRING/}" ${M
 rm -f ${MODELDIR}/simple_string_dyna_sequence/1/model.onnx
 cp ../custom_models/custom_dyna_sequence_int32/1/libtriton_dyna_sequence.so ${MODELDIR}/simple_string_dyna_sequence/1/
 
+# Add string_identity python model to repo. Used by the gRPC bytes_contents
+# regression tests in python_unit_test.py (GrpcStringIdentityBytesContentsTest)
+# to exercise the InferGRPCToInput BYTES serialization path.
+rm -rf ${MODELDIR}/string_identity
+cp -r ../python_models/string_identity ${MODELDIR}/string_identity
+mkdir -p ${MODELDIR}/string_identity/1
+mv ${MODELDIR}/string_identity/model.py ${MODELDIR}/string_identity/1/model.py
+
 rm -f *.log
 rm -f *.log.*
 
