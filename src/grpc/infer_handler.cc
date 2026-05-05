@@ -26,8 +26,6 @@
 
 #include "infer_handler.h"
 
-#include <limits>
-
 #ifndef NDEBUG
 uint64_t
 NextUniqueId()
@@ -589,36 +587,12 @@ InferGRPCToInput(
           serialized_data->emplace_back();
           auto& serialized = serialized_data->back();
 
+          // Pre-compute the total serialized byte size and reserve once to
+          // avoid repeated std::string reallocations and heap fragmentation
+          // when 'bytes_contents' carries a large number of elements.
           size_t serialized_byte_size = 0;
           for (const auto& element : io.contents().bytes_contents()) {
-            if (element.size() > std::numeric_limits<uint32_t>::max()) {
-              return TRITONSERVER_ErrorNew(
-                  TRITONSERVER_ERROR_INVALID_ARG,
-                  std::string(
-                      "input tensor '" + io.name() + "' for model '" +
-                      request.model_name() +
-                      "' has a bytes element larger than the supported "
-                      "maximum size (" +
-                      std::to_string(std::numeric_limits<uint32_t>::max()) +
-                      " bytes).")
-                      .c_str());
-            }
-
-            const size_t element_serialized_size =
-                sizeof(uint32_t) + element.size();
-            if (serialized_byte_size >
-                (std::numeric_limits<size_t>::max() -
-                 element_serialized_size)) {
-              return TRITONSERVER_ErrorNew(
-                  TRITONSERVER_ERROR_INVALID_ARG,
-                  std::string(
-                      "input tensor '" + io.name() + "' for model '" +
-                      request.model_name() +
-                      "' has bytes_contents that overflow the serialized "
-                      "byte size.")
-                      .c_str());
-            }
-            serialized_byte_size += element_serialized_size;
+            serialized_byte_size += sizeof(uint32_t) + element.size();
           }
           serialized.reserve(serialized_byte_size);
 
